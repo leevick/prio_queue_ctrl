@@ -119,8 +119,8 @@ module prio_queue_ctrl #
     wire xfer_switch_clr = outgoing_state == XFER_INIT ? 1 : 0;
     assign xfer_cmplt = outgoing_state == XFER_CMPLT ? 1 : 0;
 
-    wire m_xfer_tvalid = m_tvalid[xfer_nid];
-    wire [C_ADDR_WIDTH+C_BTT_WIDTH-1:0] m_xfer_tdata = m_tdata[xfer_nid];
+    wire m_xfer_tvalid = m_tvalid[{xfer_nid,xfer_switch}];
+    wire [C_ADDR_WIDTH+C_BTT_WIDTH-1:0] m_xfer_tdata = m_tdata[{xfer_nid,xfer_switch}];
     wire [C_NID_WIDTH-1:0] m_xfer_tdest = xfer_nid;
 
     wire[C_BTT_WIDTH-1:0] xfer_len = m_xfer_tdata[C_BTT_WIDTH-1:0];
@@ -175,7 +175,7 @@ module prio_queue_ctrl #
     end
     endgenerate
 
-    wire[63:0] s_axis_tdata = {4'b0,m_xfer_tdata};
+    wire[63:0] s_axis_tdata = {4'b0,seq[xfer_nid],m_xfer_tdata};
     wire s_axis_tready;
     wire s_axis_tvalid = outgoing_state == POP ? 1 : 0;
     wire[C_NID_WIDTH-1:0] s_axis_tdest = xfer_dest;
