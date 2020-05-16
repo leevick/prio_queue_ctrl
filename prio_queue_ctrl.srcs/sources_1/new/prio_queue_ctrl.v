@@ -22,122 +22,166 @@
 
 module prio_queue_ctrl # 
 (
-    C_NEIGHBOR_WIDTH = 5,
-    C_PRIORITY_WIDTH = 3,
-    C_BTT_WIDTH = 16
+    parameter  C_NID_WIDTH = 5,
+    parameter  C_PRIO_WIDTH = 3,
+    parameter  C_ADDR_WIDTH = 32,
+    parameter  C_BTT_WIDTH = 16,
+    parameter  C_SEQ_WIDTH = 12
 )
 (
+    (* X_INTERFACE_INFO = "xilinx.com:signal:clock:1.0 axis_aclk CLK" *)
+    (* X_INTERFACE_PARAMETER = "ASSOCIATED_BUSIF S_AXIS_S2MM:M_AXIS_MM2S, ASSOCIATED_RESET axis_aresetn, FREQ_HZ 100000000" *)
     input axis_aclk,
+    (* X_INTERFACE_INFO = "xilinx.com:signal:reset:1.0 axis_aresetn RST" *)
+    (* X_INTERFACE_PARAMETER = "POLARITY ACTIVE_LOW" *)
     input axis_aresetn,
 
-    input[47:0] s_axis_cmd_tdata,
-    input[C_NEIGHBOR_WIDTH+C_PRIORITY_WIDTH-1:0] s_axis_cmd_tdest,
-    input s_axis_cmd_tvalid,
-    output s_axis_cmd_tready,
+    (* X_INTERFACE_INFO = "xilinx.com:interface:axis:1.0 S_AXIS_S2MM TDEST" *)
+    input [C_NID_WIDTH+C_PRIO_WIDTH-1:0] s_axis_s2mm_tdest,
+    (* X_INTERFACE_INFO = "xilinx.com:interface:axis:1.0 S_AXIS_S2MM TDATA" *)
+    input [C_ADDR_WIDTH+C_BTT_WIDTH-1:0] s_axis_s2mm_tdata,
+    (* X_INTERFACE_INFO = "xilinx.com:interface:axis:1.0 S_AXIS_S2MM TVALID" *)
+    input s_axis_s2mm_tvalid,
+    (* X_INTERFACE_INFO = "xilinx.com:interface:axis:1.0 S_AXIS_S2MM TREADY" *)
+    output s_axis_s2mm_tready,
 
-    output[63:0] m_axis_mm2s_tdata,
+    (* X_INTERFACE_INFO = "xilinx.com:interface:axis:1.0 M_AXIS_MM2S TDEST" *)
+    output [C_NID_WIDTH+C_PRIO_WIDTH-1:0] m_axis_mm2s_tdest,
+    (* X_INTERFACE_INFO = "xilinx.com:interface:axis:1.0 M_AXIS_MM2S TDATA" *)
+    output [C_ADDR_WIDTH+C_BTT_WIDTH+C_SEQ_WIDTH-1:0] m_axis_mm2s_tdata,
+    (* X_INTERFACE_INFO = "xilinx.com:interface:axis:1.0 M_AXIS_MM2S TVALID" *)
     output m_axis_mm2s_tvalid,
-    input m_axis_mm2s_tready,
+    (* X_INTERFACE_INFO = "xilinx.com:interface:axis:1.0 M_AXIS_MM2S TREADY" *)
+    input m_axis_mm2s_tready    //
 
-    input dl_xfer_valid,
-    input[C_BTT_WIDTH-1:0] dl_xfer_size,
-    input[C_NEIGHBOR_WIDTH-1:0] dl_xfer_dest
+    // input xfer_valid,
+    // input[C_BTT_WIDTH-1:0] dl_xfer_size,
+    // input[C_NID_WIDTH-1:0] dl_xfer_dest,
+
+    // input mpr_flags_valid,
+    // input[2**(C_NID_WIDTH+C_PRIO_WIDTH)-1:0] mpr_flags
 
 );
 
+    localparam IDLE = 0;
+    localparam LOAD_SWITCHER = 1;
+    localparam PUSH = 2;
+    
+
+    localparam XFER_PREPARE = 1;
+    localparam XFERING = 2;
+    localparam XFER_CMPLT = 3;
+
+    reg[2**C_NID_WIDTH-1:0] mpr_flags = {2**(C_NID_WIDTH-1){1'b01}};
+    reg[C_SEQ_WIDTH-1:0] seq[0:2**C_NID_WIDTH-1];   //Sequence number for each neighbor
+    
+    wire[2 ** (C_PRIO_WIDTH + C_NID_WIDTH) - 1:0] s_tvalid;
+    wire[C_ADDR_WIDTH+C_BTT_WIDTH-1:0] s_tdata[0:2 ** (C_PRIO_WIDTH + C_NID_WIDTH) - 1];
+    wire[2 ** (C_PRIO_WIDTH + C_NID_WIDTH) - 1:0] s_tready;
+
+    wire[2 ** (C_PRIO_WIDTH + C_NID_WIDTH) - 1:0] m_tvalid;
+    wire[C_ADDR_WIDTH+C_BTT_WIDTH-1:0] m_tdata[0:2 ** (C_PRIO_WIDTH + C_NID_WIDTH) - 1];
+    wire[2 ** (C_PRIO_WIDTH + C_NID_WIDTH) - 1:0] m_tready;
+
+    wire m_axis_tvalid;
+    wire m_axis_tready;
+    wire [C_ADDR_WIDTH+C_BTT_WIDTH-1:0] m_axis_tdata;
+    wire [C_NID_WIDTH+C_PRIO_WIDTH-1:0] m_axis_tdest;
+
+    integer incoming_state;
+    always @(posedge axis_aclk) begin
+    if(!axis_aresetn)
+        incoming_state <= IDLE;
+    else
+    case (incoming_state)
+        IDLE:
+        if(m_axis_tvalid)
+            incoming_state <= LOAD_SWITCHER;
+        LOAD_SWITCHER:
+            incoming_state <= PUSH;
+        PUSH:
+            incoming_state <= IDLE;
+        default: 
+            incoming_state <= IDLE;
+    endcase
+    end
+
+    integer outgoing_state;
+    always @(posedge axis_aclk) begin
+    if(!axis_aresetn)
+        outgoing_state <= IDLE;
+    else
+    case (outgoing_state)
+        default: 
+        outgoing_state <= IDLE;
+    endcase
+    end
+
+    //Switcher instance
+    wire switcher_enb = incoming_state == LOAD_SWITCHER ? 1 : 0;
+    reg[2**(C_NID_WIDTH+C_PRIO_WIDTH)-1:0] switcher;
+    reg[C_NID_WIDTH+C_PRIO_WIDTH:0] index = 0;
+    //reg[C_NID_WIDTH+C_PRIO_WIDTH-1:0] index;
+    always @(posedge axis_aclk)
+    if(!axis_aresetn)
+        switcher <= 0;
+    else if (switcher_enb) begin
+    //Process broadcast message
+    if (m_axis_tdest[C_NID_WIDTH+C_PRIO_WIDTH-1-:C_NID_WIDTH] == {C_NID_WIDTH{1'b1}}) begin
+        for (index = 0;index < 2**(C_NID_WIDTH+C_PRIO_WIDTH);index = index+1) begin
+            if (m_axis_tdest[C_PRIO_WIDTH-1:0] == index[C_PRIO_WIDTH-1:0]
+                && mpr_flags[index[C_PRIO_WIDTH+C_NID_WIDTH-1-:C_NID_WIDTH]] == 1)
+                switcher[index] <= 1;
+            else
+                switcher[index] <= 0;
+        end
+    //Process unicast message
+    end else begin
+        for (index = 0;index < 2**(C_NID_WIDTH+C_PRIO_WIDTH);index = index+1) begin
+            if (index[C_NID_WIDTH+C_PRIO_WIDTH-1:0] == m_axis_tdest)
+                switcher[index] <= 1;
+            else
+                switcher[index] <= 0;
+        end
+    end
+    end else begin
+        switcher <= 0;
+    end
+
+    
+
     genvar i;
     generate
-    for(i=0;i<2^(C_NEIGHBOR_WIDTH+C_PRIORITY_WIDTH);i=i+1) 
-    begin
-        axis_data_fifo_0 (
-          .s_axis_aresetn(axis_aresetn),  // input wire s_axis_aresetn
-          .s_axis_aclk(axis_aclk),        // input wire s_axis_aclk
-          .s_axis_tvalid(s_axis_tvalid),    // input wire s_axis_tvalid
-          .s_axis_tready(s_axis_tready),    // output wire s_axis_tready
-          .s_axis_tdata(s_axis_tdata),      // input wire [47 : 0] s_axis_tdata
-          .m_axis_aclk(m_axis_aclk),        // input wire m_axis_aclk
-          .m_axis_tvalid(m_axis_tvalid),    // output wire m_axis_tvalid
-          .m_axis_tready(m_axis_tready),    // input wire m_axis_tready
-          .m_axis_tdata(m_axis_tdata)      // output wire [47 : 0] m_axis_tdata
-        );    
+    for (i = 0;i < 2 ** (C_PRIO_WIDTH + C_NID_WIDTH) ;i = i + 1 ) begin
+        assign s_tdata[i] = switcher[i] ? m_axis_tdata : 0;
+        assign s_tvalid[i] = switcher[i] ? 1 : 0;
+        axis_data_fifo_0 fifo_inst (
+            .s_axis_aresetn(axis_aresetn),
+            .s_axis_aclk(axis_aclk),
+            .s_axis_tvalid(s_tvalid[i]),
+            .s_axis_tready(),
+            .s_axis_tdata(s_tdata[i]),
+            .m_axis_aclk(axis_aclk),
+            .m_axis_tvalid(m_tvalid[i]),
+            .m_axis_tready(0),
+            .m_axis_tdata(m_tdata[i])
+        );
     end
     endgenerate
-    
-    
-    axis_switch_v1_1_19_axis_switch #(
-    .C_FAMILY("virtex7"),
-    .C_NUM_SI_SLOTS(1),
-    .C_LOG_SI_SLOTS(1),
-    .C_NUM_MI_SLOTS(2^(C_NEIGHBOR_WIDTH + C_PRIORITY_WIDTH)),
-    .C_AXIS_TDATA_WIDTH(48),
-    .C_AXIS_TID_WIDTH(1),
-    .C_AXIS_TDEST_WIDTH(C_NEIGHBOR_WIDTH + C_PRIORITY_WIDTH),
-    .C_AXIS_TUSER_WIDTH(1),
-    .C_AXIS_SIGNAL_SET(32'B00000000000000000000000001000011),
-    .C_ARB_ON_MAX_XFERS(1),
-    .C_ARB_ON_NUM_CYCLES(0),
-    .C_ARB_ON_TLAST(0),
-    .C_INCLUDE_ARBITER(1),
-    .C_ARB_ALGORITHM(0),
-    .C_OUTPUT_REG(0),
-    .C_DECODER_REG(1),
-    .C_ROUTING_MODE(0),
-    .C_S_AXI_CTRL_ADDR_WIDTH(7),
-    .C_S_AXI_CTRL_DATA_WIDTH(32),
-    .C_COMMON_CLOCK(0)
-  ) inst (
-    .aclk(aclk),
-    .aresetn(aresetn),
-    .aclken(1'H1),
-    .s_axis_tvalid(s_axis_tvalid),
-    .s_axis_tready(s_axis_tready),
-    .s_axis_tdata(s_axis_tdata),
-    .s_axis_tstrb(6'H3F),
-    .s_axis_tkeep(6'H3F),
-    .s_axis_tlast(1'H1),
-    .s_axis_tid(1'H0),
-    .s_axis_tdest(s_axis_tdest),
-    .s_axis_tuser(1'H0),
-    .m_axis_tvalid(m_axis_tvalid),
-    .m_axis_tready(m_axis_tready),
-    .m_axis_tdata(m_axis_tdata),
-    .m_axis_tstrb(),
-    .m_axis_tkeep(),
-    .m_axis_tlast(),
-    .m_axis_tid(),
-    .m_axis_tdest(m_axis_tdest),
-    .m_axis_tuser(),
-    .arb_req(),
-    .arb_done(),
-    .arb_gnt(8'H00),
-    .arb_sel(8'H00),
-    .arb_last(),
-    .arb_id(),
-    .arb_dest(),
-    .arb_user(),
-    .s_req_suppress(1'H0),
-    .s_axi_ctrl_aclk(1'H0),
-    .s_axi_ctrl_aresetn(1'H0),
-    .s_axi_ctrl_awvalid(1'H0),
-    .s_axi_ctrl_awready(),
-    .s_axi_ctrl_awaddr(7'H00),
-    .s_axi_ctrl_wvalid(1'H0),
-    .s_axi_ctrl_wready(),
-    .s_axi_ctrl_wdata(32'H00000000),
-    .s_axi_ctrl_bvalid(),
-    .s_axi_ctrl_bready(1'H0),
-    .s_axi_ctrl_bresp(),
-    .s_axi_ctrl_arvalid(1'H0),
-    .s_axi_ctrl_arready(),
-    .s_axi_ctrl_araddr(7'H00),
-    .s_axi_ctrl_rvalid(),
-    .s_axi_ctrl_rready(1'H0),
-    .s_axi_ctrl_rdata(),
-    .s_axi_ctrl_rresp(),
-    .s_decode_err(s_decode_err)
-  );
-    
-    
+
+    assign m_axis_tready = incoming_state == PUSH ? 1 : 0;
+    axis_data_fifo_1 fifo_input_inst (
+        .s_axis_aresetn(axis_aresetn),
+        .s_axis_aclk(axis_aclk),
+        .s_axis_tvalid(s_axis_s2mm_tvalid),
+        .s_axis_tready(s_axis_s2mm_tready),
+        .s_axis_tdata(s_axis_s2mm_tdata),
+        .s_axis_tdest(s_axis_s2mm_tdest),
+        .m_axis_tvalid(m_axis_tvalid),
+        .m_axis_tready(m_axis_tready),
+        .m_axis_tdata(m_axis_tdata),
+        .m_axis_tdest(m_axis_tdest)
+    );
 
     
 endmodule
