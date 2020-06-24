@@ -146,7 +146,7 @@ module prio_queue_ctrl #
 
     //xfer accumulator
     wire xfer_btt_accum_clr = outgoing_state == XFER_INIT ? 1 : 0;
-    wire xfer_btt_accum_enb = outgoing_state == POP ? 1 : 0;
+    wire xfer_btt_accum_enb = outgoing_state == POP && m_xfer_tvalid ? 1 : 0;
     always @(posedge axis_aclk)
     if (!axis_aresetn || xfer_btt_accum_clr)
         xfer_btt_accum <= 0;
@@ -166,7 +166,7 @@ module prio_queue_ctrl #
     genvar k;
     generate
     for(k=0;k<2 ** C_NID_WIDTH;k = k + 1) begin
-        assign pop[k] = outgoing_state == POP && xfer_nid == k ? 1 : 0;
+        assign pop[k] = outgoing_state == POP && m_xfer_tvalid && xfer_nid == k ? 1 : 0;
     always @(posedge axis_aclk)
     if(!axis_aresetn)
         seq[k] <= 0;
@@ -177,7 +177,7 @@ module prio_queue_ctrl #
 
     wire[63:0] s_axis_tdata = {4'b0,seq[xfer_nid],m_xfer_tdata};
     wire s_axis_tready;
-    wire s_axis_tvalid = outgoing_state == POP ? 1 : 0;
+    wire s_axis_tvalid = outgoing_state == POP && m_xfer_tvalid ? 1 : 0;
     wire[C_NID_WIDTH-1:0] s_axis_tdest = xfer_dest;
 
     always @(posedge axis_aclk) begin
