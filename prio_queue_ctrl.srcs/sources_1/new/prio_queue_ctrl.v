@@ -58,12 +58,20 @@ module prio_queue_ctrl #
     input[C_BTT_WIDTH-1:0] xfer_btt,
     input[C_NID_WIDTH-1:0] xfer_dest,
 
-    output xfer_cmplt   //
+    output xfer_cmplt,
 
-    // input mpr_flags_valid,
-    // input[2**(C_NID_WIDTH+C_PRIO_WIDTH)-1:0] mpr_flags
+    input[2**C_NID_WIDTH-1:0] mpr_flags
 
 );
+
+    reg [2**C_NID_WIDTH-1:0] mpr_flags_buf;
+    
+    always @(posedge axis_aclk) begin
+        if (!axis_aresetn)
+            mpr_flags_buf <= 0;
+        else
+            mpr_flags_buf <= mpr_flags;
+    end
 
     localparam IDLE = 0;
     localparam LOAD_SWITCHER = 1;
@@ -75,7 +83,6 @@ module prio_queue_ctrl #
     localparam SWITCH_NEXT = 4;
     localparam XFER_CMPLT = 5;
 
-    reg[2**C_NID_WIDTH-1:0] mpr_flags = {2**(C_NID_WIDTH-1){1'b01}};
     reg[C_SEQ_WIDTH-1:0] seq[0:2**C_NID_WIDTH-1];   //Sequence number for each neighbor
     
     wire[2 ** (C_PRIO_WIDTH + C_NID_WIDTH) - 1:0] s_tvalid;
@@ -231,7 +238,7 @@ module prio_queue_ctrl #
     if (m_axis_tdest[C_NID_WIDTH+C_PRIO_WIDTH-1-:C_NID_WIDTH] == {C_NID_WIDTH{1'b1}}) begin
         for (index = 0;index < 2**(C_NID_WIDTH+C_PRIO_WIDTH);index = index+1) begin
             if (m_axis_tdest[C_PRIO_WIDTH-1:0] == index[C_PRIO_WIDTH-1:0]
-                && mpr_flags[index[C_PRIO_WIDTH+C_NID_WIDTH-1-:C_NID_WIDTH]] == 1)
+                && mpr_flags_buf[index[C_PRIO_WIDTH+C_NID_WIDTH-1-:C_NID_WIDTH]] == 1)
                 switcher[index] <= 1;
             else
                 switcher[index] <= 0;
