@@ -158,7 +158,7 @@ module prio_queue_ctrl #
     if (!axis_aresetn || xfer_btt_accum_clr)
         xfer_btt_accum <= 0;
     else if (xfer_btt_accum_enb)
-        xfer_btt_accum <= xfer_btt_accum + xfer_len;
+        xfer_btt_accum <= xfer_btt_accum + xfer_len + 16;
 
 
     //xfer switch instance
@@ -199,12 +199,15 @@ module prio_queue_ctrl #
             outgoing_state <= XFER_PREPARE;
         XFER_PREPARE:
         if (m_xfer_tvalid)
+            if (xfer_btt_accum + xfer_len + 16 > xfer_btt_total)
+            outgoing_state <= XFER_CMPLT;
+            else
             outgoing_state <= POP;
         else
             outgoing_state <= SWITCH_NEXT;
         POP:
         if (m_xfer_tvalid)
-            if (xfer_btt_accum + xfer_len > xfer_btt_total)
+            if (xfer_btt_accum + xfer_len + 16 > xfer_btt_total)
             outgoing_state <= XFER_CMPLT;
             else
             outgoing_state <= POP;
