@@ -60,7 +60,9 @@ module prio_queue_ctrl #
 
     output xfer_cmplt,
 
-    input[2**C_NID_WIDTH-1:0] mpr_flags
+    input[2**C_NID_WIDTH-1:0] mpr_flags,
+    
+    output [C_BTT_WIDTH-1:0] btt_accum
 
 );
 
@@ -306,5 +308,7 @@ module prio_queue_ctrl #
         .m_axis_tdata(m_axis_mm2s_tdata),
         .m_axis_tdest(m_axis_mm2s_tdest)
     );
+    
+    assign btt_accum = xfer_btt_accum;
     
 endmodule
